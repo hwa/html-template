@@ -60,6 +60,17 @@ order to be printed first."
       (write-string string *template-output*)
       (funcall next-fn values))))
 
+(defun create-const-printer (string-list symbol-value &optional (next-fn #'no-values))
+  "Used internally to create template printers for TMPL_CONST. SYMBOL-VALUE
+is a cons of (SYMBOL . VALUE). NEXT-FN is the next function to be called in
+the chain of closures. STRING-LIST is a list of strings in reverse
+order to be printed first."
+  (let ((string (list-to-string string-list)))
+    (lambda (values)
+      (write-string string *template-output*)
+      (setf (getf values (car symbol-value)) (cdr symbol-value))
+      (funcall next-fn values))))
+
 (defun create-var-printer (string-list symbol next-fn)
   "Used internally to create template printers for TMPL_VAR. SYMBOL is
 the symbol associated with the tag. NEXT-FN is the next function to be
@@ -74,10 +85,10 @@ reverse order to be printed first."
                         (if *convert-nil-to-empty-string*
                             ""
                             (with-use-value-restart (symbol)
-                              (signal-template-missing-value-error 
+                              (signal-template-missing-value-error
                                "Value for symbol ~S is NIL"
                                symbol))))
-                       (string value)                            
+                       (string value)
                        (otherwise
                         (cond (*format-non-strings* (format nil "~A" value))
                               (t (with-use-value-restart (symbol)
@@ -98,7 +109,7 @@ of strings in reverse order to be printed first."
       (write-string string *template-output*)
       (funcall (car (gethash pathname *printer-hash*)) values)
       (funcall next-fn values))))
-  
+
 (defun create-if-printer (string-list symbol if-fn else-fn next-fn unlessp)
   "Used internally to create template printers for TMPL_IF and
 TMPL_UNLESS tags. SYMBOL is the symbol associated with the tag.  IF-FN
@@ -265,6 +276,21 @@ TMPL_IF or TMPL_UNLESS, a corresponding TMPL_ELSE was seen."
                                          merged-pathname
                                          next-fn)
                  else-follows))))
+          ((string-equal token "TMPL_CONST")
+           (let ((symbol-value (read-tag-value-rest)))
+             (multiple-value-bind (next-fn else-follows)
+                 ;; first we recursively create the template printer
+                 ;; for the rest of the stream
+                 (create-template-printer-aux nil end-token)
+               (values
+                ;; then we combine it with the strings before the tag
+                ;; to create a template printer for TMPL_VAR - note
+                ;; that we don't skip leading and trailing whitespace
+                ;; here
+                (create-const-printer (cons string string-stack)
+                                    symbol-value
+                                    next-fn)
+                else-follows))))
           ((string-equal token "TMPL_VAR")
             ;; TMPL_VAR tag - first read the symbol which has to
             ;; follow and intern it

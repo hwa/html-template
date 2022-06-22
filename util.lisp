@@ -243,6 +243,55 @@ pointer."
                       old-fill-pointer)))))
   string)
 
+(defun read-tag-value-rest (&key (intern t) (eof-action t))
+  "Reads the rest of a template tag from *STANDARD-INPUT* after TMPL_CONST
+has been read. Reads and returns the symbol and its value as cons of
+ (SYMBOL . VALUE). Optionally also interns the attribute string if INTERN
+is true. See READ-WHILE's docstring for EOF-ACTION."
+  (with-syntax-error-location ()
+    (let (rest)
+      (handler-case
+          (let ((attribute (progn
+                             (skip-whitespace :assert t)
+                             (let ((string (with-syntax-error-location ()
+                                             (read-delimited-string :eof-action
+                                                                    (lambda (collector)
+                                                                      (declare (ignore collector))
+                                                                      (signal-template-syntax-error
+                                                                       "EOF while reading tag attribute"))))))
+                               (if intern
+                                   (intern
+                                    (funcall (if *upcase-attribute-strings*
+                                                 #'string-upcase
+                                                 #'identity)
+                                             string)
+                                    *template-symbol-package*)
+                                   string)))))
+            (let ((value (progn
+                           (skip-whitespace :assert t)
+                           (let ((string (with-syntax-error-location ()
+                                           (read-delimited-string :eof-action
+                                                                  (lambda (collector)
+                                                                    (declare (ignore collector))
+                                                                    (signal-template-syntax-error
+                                                                     "EOF while reading tag attribute"))))))
+                             string))))
+              (skip-whitespace)
+              (setq rest (read-until *template-end-marker*
+                                     :skip nil
+                                     :eof-action eof-action))
+              (when (plusp (length rest))
+                (signal-template-syntax-error "Expected ~S but read ~S"
+                                              *template-end-marker*
+                                              rest))
+              (cons attribute value)))
+        (end-of-file ()
+          (cond ((eq eof-action t)
+                 (signal-template-syntax-error "Unexpected EOF"))
+                ((null eof-action)
+                 nil)
+                (t (funcall eof-action rest))))))))
+
 (defun read-tag-rest (&key read-attribute (intern t) (eof-action t))
   "Reads the rest of a template tag from *STANDARD-INPUT* after the
 name of the tag has been read. Reads and returns the tag's attribute
